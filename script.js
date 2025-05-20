@@ -11,7 +11,7 @@ const locationInput = document.getElementById('location-input');
 const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-const API_KEY = '9c863cc17741c132a322bcaed8bfb52c';
+const API_KEY = '0878813d9b9fdb5af8a555876964d7f6';
 
 // Update time and date every second
 setInterval(() => {
@@ -20,7 +20,11 @@ setInterval(() => {
     const date = time.getDate();
     const day = time.getDay();
     const hour = time.getHours();
-    const hoursIn12HrFormat = hour >= 13 ? hour % 12 : hour;
+
+    // Convert to 12-hour format, 12 instead of 0
+    let hoursIn12HrFormat = hour % 12;
+    hoursIn12HrFormat = hoursIn12HrFormat === 0 ? 12 : hoursIn12HrFormat;
+
     const minutes = time.getMinutes();
     const ampm = hour >= 12 ? 'PM' : 'AM';
 
@@ -38,71 +42,92 @@ searchBtn.addEventListener('click', () => {
     if (location !== '') {
         getWeatherDataByLocation(location);
         locationInput.value = '';
+    } else {
+        alert('Please enter a location');
     }
 });
 
-// Get weather data by city name
-function getWeatherDataByLocation(location) {
-    fetch(`https://api.openweathermap.org/data/2.5/weather?q=${location}&units=metric&appid=${API_KEY}`)
-        .then(res => res.json())
-        .then(data => {
-            const { coord } = data;
-            if (coord) {
-                const { lat, lon } = coord;
-                fetch(`https://api.openweathermap.org/data/2.5/onecall?lat=${lat}&lon=${lon}&exclude=hourly,minutely&units=metric&appid=${API_KEY}`)
-                    .then(res => res.json())
-                    .then(data => showWeatherData(data, location));
-            } else {
-                alert('Location not found!');
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching weather data:', error);
-            alert('Failed to fetch weather data!');
-        });
+// Fetch weather data by city name using async/await for clarity
+async function getWeatherDataByLocation(location) {
+    try {
+        // Get current weather data to find coordinates
+        const response = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(location)}&units=metric&appid=${API_KEY}`);
+        if (!response.ok) throw new Error('Location not found!');
+        const data = await response.json();
+
+        if (!data.coord) {
+            alert('Location coordinates not found!');
+            return;
+        }
+        const { lat, lon } = data.coord;
+
+        // Fetch detailed weather info (One Call API)
+        const oneCallResponse = await fetch(`https://api.openweathermap.org/data/2.5/onecall?lat=${lat}&lon=${lon}&exclude=hourly,minutely&units=metric&appid=${API_KEY}`);
+        if (!oneCallResponse.ok) throw new Error('Failed to get detailed weather data');
+        const weatherData = await oneCallResponse.json();
+
+        showWeatherData(weatherData, location);
+    } catch (error) {
+        console.error('Error fetching weather data:', error);
+        alert(error.message);
+    }
 }
 
 // Display weather data on the page
 function showWeatherData(data, location) {
-    timezone.innerHTML = data.timezone;
+    timezone.innerHTML = data.timezone || 'N/A';
     countryEl.innerHTML = location;
 
-    const { humidity, pressure, sunrise, sunset, wind_speed } = data.current;
+    const current = data.current;
+    if (!current) {
+        alert('Current weather data is not available');
+        return;
+    }
 
+    const { humidity, pressure, sunrise, sunset, wind_speed, weather, dt } = current;
+
+    // You need to include moment.js in your HTML for these moment calls to work
     currentWeatherItemsEl.innerHTML = `
-        <div class="weather-item"><div>Humidity</div><div>${humidity}%</div></div>
-        <div class="weather-item"><div>Pressure</div><div>${pressure}</div></div>
-        <div class="weather-item"><div>Wind Speed</div><div>${wind_speed} m/s</div></div>
-        <div class="weather-item"><div>Sunrise</div><div>${moment(sunrise * 1000).format('hh:mm A')}</div></div>
-        <div class="weather-item"><div>Sunset</div><div>${moment(sunset * 1000).format('hh:mm A')}</div></div>
+        <div class="weather-item"><div>Humidity</div><div>${humidity !== undefined ? humidity + '%' : 'N/A'}</div></div>
+        <div class="weather-item"><div>Pressure</div><div>${pressure !== undefined ? pressure + ' hPa' : 'N/A'}</div></div>
+        <div class="weather-item"><div>Wind Speed</div><div>${wind_speed !== undefined ? wind_speed + ' m/s' : 'N/A'}</div></div>
+        <div class="weather-item"><div>Sunrise</div><div>${sunrise ? moment(sunrise * 1000).format('hh:mm A') : 'N/A'}</div></div>
+        <div class="weather-item"><div>Sunset</div><div>${sunset ? moment(sunset * 1000).format('hh:mm A') : 'N/A'}</div></div>
     `;
 
-    const current = data.current;
-    const icon = current.weather[0].icon;
-    const nightTemp = data.daily[0].temp.night;
-    const dayTemp = data.daily[0].temp.day;
+    const icon = weather && weather[0] ? weather[0].icon : '01d';
+    const nightTemp = data.daily && data.daily[0] && data.daily[0].temp ? data.daily[0].temp.night : 'N/A';
+    const dayTemp = data.daily && data.daily[0] && data.daily[0].temp ? data.daily[0].temp.day : 'N/A';
 
     currentTempEl.innerHTML = `
         <img src="https://openweathermap.org/img/wn/${icon}@2x.png" alt="weather icon" class="w-icon">
         <div class="other">
-            <div class="day">${moment(current.dt * 1000).format('dddd')}</div>
+            <div class="day">${dt ? moment(dt * 1000).format('dddd') : 'N/A'}</div>
             <div class="temp">Night - ${nightTemp}&#176;C</div>
             <div class="temp">Day - ${dayTemp}&#176;C</div>
         </div>
     `;
 
     let forecastHTML = '';
-    data.daily.slice(1, 6).forEach(day => {
-        const icon = day.weather[0].icon;
-        forecastHTML += `
-            <div class="weather-forecast-item">
-                <div class="day">${moment(day.dt * 1000).format('ddd')}</div>
-                <img src="https://openweathermap.org/img/wn/${icon}@2x.png" alt="weather icon" class="w-icon">
-                <div class="temp">Night - ${day.temp.night}&#176;C</div>
-                <div class="temp">Day - ${day.temp.day}&#176;C</div>
-            </div>
-        `;
-    });
+    if (data.daily && data.daily.length > 1) {
+        data.daily.slice(1, 6).forEach(day => {
+            const icon = day.weather && day.weather[0] ? day.weather[0].icon : '01d';
+            const dayName = day.dt ? moment(day.dt * 1000).format('ddd') : 'N/A';
+            const nightTemp = day.temp ? day.temp.night : 'N/A';
+            const dayTemp = day.temp ? day.temp.day : 'N/A';
+
+            forecastHTML += `
+                <div class="weather-forecast-item">
+                    <div class="day">${dayName}</div>
+                    <img src="https://openweathermap.org/img/wn/${icon}@2x.png" alt="weather icon" class="w-icon">
+                    <div class="temp">Night - ${nightTemp}&#176;C</div>
+                    <div class="temp">Day - ${dayTemp}&#176;C</div>
+                </div>
+            `;
+        });
+    } else {
+        forecastHTML = '<div>No forecast data available</div>';
+    }
 
     weatherForecastEl.innerHTML = forecastHTML;
 }
